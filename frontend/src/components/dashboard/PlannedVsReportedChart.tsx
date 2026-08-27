@@ -1,5 +1,6 @@
 import {
   Bar,
+  BarChart,
   CartesianGrid,
   ComposedChart,
   Legend,
@@ -13,6 +14,10 @@ import type { ProductionTrendPoint } from "@/types/dashboard";
 import { formatCompact, formatDate, formatNumber } from "@/lib/format";
 import { ChartPanel } from "./ChartPanel";
 import { Skeleton } from "@/components/ui/skeleton";
+
+// ── Color tokens ─────────────────────────────────────────────────────────────
+const COLOR_PLANNED  = "#94A3B8";   // slate-400 — grey bars
+const COLOR_REPORTED = "#EA580C";   // orange-600 — line (multi) / bar (single)
 
 interface Props {
   data: ProductionTrendPoint[];
@@ -45,12 +50,61 @@ function EmptyState() {
   );
 }
 
+/** Shared axis / tooltip / legend props to keep both render paths consistent. */
+function sharedAxisProps(chartData: Array<{ label: string; displayDate: string }>) {
+  return {
+    xAxisProps: {
+      dataKey: "label" as const,
+      tick: { fontSize: 11, fill: "var(--color-muted-foreground)" } as const,
+      axisLine: { stroke: "var(--color-border)" } as const,
+      tickLine: false,
+      interval: "preserveStartEnd" as const,
+      minTickGap: 40,
+    },
+    yAxisProps: {
+      tickFormatter: (v: number) => formatCompact(v),
+      tick: { fontSize: 11, fill: "var(--color-muted-foreground)" } as const,
+      axisLine: false,
+      tickLine: false,
+      width: 52,
+    },
+    tooltipProps: {
+      contentStyle: {
+        borderRadius: 8,
+        border: "1px solid var(--color-border)",
+        background: "var(--color-card)",
+        fontSize: 12,
+      },
+      labelFormatter: (
+        _label: string,
+        payload: Array<{ payload?: (typeof chartData)[number] }>,
+      ) => {
+        const d = payload?.[0]?.payload;
+        return d?.displayDate ?? _label;
+      },
+      formatter: (value: number, name: string) => [
+        formatNumber(value),
+        name === "Planned" ? "Planned" : "Reported",
+      ],
+    },
+    legendProps: {
+      iconType: "circle" as const,
+      iconSize: 8,
+      formatter: (name: string) => (
+        <span style={{ fontSize: 11, color: "var(--color-muted-foreground)" }}>{name}</span>
+      ),
+    },
+  };
+}
+
 export function PlannedVsReportedChart({ data, isLoading }: Props) {
   const chartData = data.map((p) => ({
     ...p,
     label: formatAxisDate(p.date),
     displayDate: /^\d{8}$/.test(p.date) ? formatDate(p.date) : p.date,
   }));
+
+  const { xAxisProps, yAxisProps, tooltipProps, legendProps } = sharedAxisProps(chartData);
 
   return (
     <ChartPanel
@@ -67,73 +121,74 @@ export function PlannedVsReportedChart({ data, isLoading }: Props) {
       ) : (
         <div className="h-[280px]">
           <ResponsiveContainer width="100%" height="100%">
-            <ComposedChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <CartesianGrid vertical={false} stroke="var(--color-border)" />
+            {chartData.length === 1 ? (
+              /*
+               * Single-day view: a standard grouped BarChart.
+               * A Line cannot be rendered from a single point, so two adjacent
+               * bars give an immediately readable comparison instead.
+               */
+              <BarChart
+                data={chartData}
+                margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+                barCategoryGap="30%"
+                barGap={4}
+              >
+                <CartesianGrid vertical={false} stroke="var(--color-border)" />
+                <XAxis {...xAxisProps} />
+                <YAxis {...yAxisProps} />
+                <Tooltip {...tooltipProps} />
+                <Legend {...legendProps} />
 
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
-                axisLine={{ stroke: "var(--color-border)" }}
-                tickLine={false}
-                interval="preserveStartEnd"
-                minTickGap={40}
-              />
-              <YAxis
-                tickFormatter={(v: number) => formatCompact(v)}
-                tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
-                axisLine={false}
-                tickLine={false}
-                width={52}
-              />
+                <Bar
+                  dataKey="plannedQuantity"
+                  name="Planned"
+                  fill={COLOR_PLANNED}
+                  fillOpacity={0.75}
+                  radius={[3, 3, 0, 0]}
+                />
+                <Bar
+                  dataKey="reportedQuantity"
+                  name="Reported"
+                  fill={COLOR_REPORTED}
+                  fillOpacity={0.85}
+                  radius={[3, 3, 0, 0]}
+                />
+              </BarChart>
+            ) : (
+              /*
+               * Multi-day view: ComposedChart — grey bars (Planned) + orange
+               * line (Reported).  The line is meaningful only when there are
+               * at least two data points.
+               */
+              <ComposedChart
+                data={chartData}
+                margin={{ top: 8, right: 8, left: 0, bottom: 0 }}
+              >
+                <CartesianGrid vertical={false} stroke="var(--color-border)" />
+                <XAxis {...xAxisProps} />
+                <YAxis {...yAxisProps} />
+                <Tooltip {...tooltipProps} />
+                <Legend {...legendProps} />
 
-              <Tooltip
-                contentStyle={{
-                  borderRadius: 8,
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-card)",
-                  fontSize: 12,
-                }}
-                labelFormatter={(_label, payload: Array<{ payload?: (typeof chartData)[number] }>) => {
-                  const d = payload?.[0]?.payload;
-                  return d?.displayDate ?? _label;
-                }}
-                formatter={(value: number, name: string) => [
-                  formatNumber(value),
-                  name === "Planned" ? "Planned" : "Reported",
-                ]}
-              />
-
-              <Legend
-                iconType="circle"
-                iconSize={8}
-                formatter={(name: string) => (
-                  <span style={{ fontSize: 11, color: "var(--color-muted-foreground)" }}>
-                    {name}
-                  </span>
-                )}
-              />
-
-              {/* Planned: grey bars behind the Reported line */}
-              <Bar
-                dataKey="plannedQuantity"
-                name="Planned"
-                fill="#94A3B8"
-                fillOpacity={0.65}
-                barSize={12}
-                radius={[3, 3, 0, 0]}
-              />
-
-              {/* Reported: solid burnt-orange line drawn on top of the bars */}
-              <Line
-                type="monotone"
-                dataKey="reportedQuantity"
-                name="Reported"
-                stroke="#EA580C"
-                strokeWidth={2.5}
-                dot={false}
-                activeDot={{ r: 5, fill: "#EA580C", stroke: "#fff", strokeWidth: 2 }}
-              />
-            </ComposedChart>
+                <Bar
+                  dataKey="plannedQuantity"
+                  name="Planned"
+                  fill={COLOR_PLANNED}
+                  fillOpacity={0.65}
+                  barSize={12}
+                  radius={[3, 3, 0, 0]}
+                />
+                <Line
+                  type="monotone"
+                  dataKey="reportedQuantity"
+                  name="Reported"
+                  stroke={COLOR_REPORTED}
+                  strokeWidth={2.5}
+                  dot={false}
+                  activeDot={{ r: 5, fill: COLOR_REPORTED, stroke: "#fff", strokeWidth: 2 }}
+                />
+              </ComposedChart>
+            )}
           </ResponsiveContainer>
         </div>
       )}

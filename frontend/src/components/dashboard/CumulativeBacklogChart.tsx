@@ -1,7 +1,11 @@
 import {
   Area,
   AreaChart,
+  Bar,
+  BarChart,
   CartesianGrid,
+  Cell,
+  LabelList,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -47,12 +51,55 @@ function EmptyState() {
   );
 }
 
+/** Shared formatter used in both the AreaChart and the single-day BarChart. */
+function tooltipFormatter(value: number, name: string): [string, string] {
+  const labels: Record<string, string> = {
+    cumulativeBacklog: "Cumulative Backlog",
+    dailyDifference: "Daily Difference",
+    plannedQuantity: "Planned",
+    reportedQuantity: "Reported",
+  };
+  return [formatNumber(value), labels[name] ?? name];
+}
+
 export function CumulativeBacklogChart({ data, isLoading }: Props) {
   const chartData = data.map((p) => ({
     ...p,
     label: formatAxisDate(p.date),
     displayDate: /^\d{8}$/.test(p.date) ? formatDate(p.date) : p.date,
   }));
+
+  const sharedTooltipProps = {
+    contentStyle: {
+      borderRadius: 8,
+      border: "1px solid var(--color-border)",
+      background: "var(--color-card)",
+      fontSize: 12,
+    },
+    labelFormatter: (
+      _label: string,
+      payload: Array<{ payload?: (typeof chartData)[number] }>,
+    ) => {
+      const d = payload?.[0]?.payload;
+      return d?.displayDate ?? _label;
+    },
+    formatter: tooltipFormatter,
+  };
+
+  const sharedXAxisProps = {
+    dataKey: "label" as const,
+    tick: { fontSize: 11, fill: "var(--color-muted-foreground)" } as const,
+    axisLine: { stroke: "var(--color-border)" } as const,
+    tickLine: false,
+  };
+
+  const sharedYAxisProps = {
+    tickFormatter: (v: number) => formatCompact(v),
+    tick: { fontSize: 11, fill: "var(--color-muted-foreground)" } as const,
+    axisLine: false,
+    tickLine: false,
+    width: 52,
+  };
 
   return (
     <ChartPanel
@@ -69,65 +116,77 @@ export function CumulativeBacklogChart({ data, isLoading }: Props) {
       ) : (
         <div className="h-[280px]">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="gradCumulativeBacklog" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--color-critical)" stopOpacity={0.22} />
-                  <stop offset="95%" stopColor="var(--color-critical)" stopOpacity={0.02} />
-                </linearGradient>
-              </defs>
+            {chartData.length === 1 ? (
+              /*
+               * Single-day view: a single BarChart bar.
+               * An AreaChart with one point renders only an isolated dot and
+               * gives no useful information about trend or magnitude.
+               * One red/orange bar clearly shows the backlog value for the day.
+               */
+              <BarChart
+                data={chartData}
+                margin={{ top: 24, right: 8, left: 0, bottom: 0 }}
+                barCategoryGap="50%"
+              >
+                <CartesianGrid vertical={false} stroke="var(--color-border)" />
+                <XAxis {...sharedXAxisProps} />
+                <YAxis {...sharedYAxisProps} />
+                <Tooltip {...sharedTooltipProps} />
 
-              <CartesianGrid vertical={false} stroke="var(--color-border)" />
+                <Bar
+                  dataKey="cumulativeBacklog"
+                  name="cumulativeBacklog"
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={80}
+                >
+                  {/* Tint the bar using the existing critical color token */}
+                  <Cell fill="var(--color-critical)" fillOpacity={0.85} />
+                  {/* Value label above the bar */}
+                  <LabelList
+                    dataKey="cumulativeBacklog"
+                    position="top"
+                    formatter={(v: number) => formatCompact(v)}
+                    style={{
+                      fill: "var(--color-foreground)",
+                      fontSize: 11,
+                      fontWeight: 600,
+                    }}
+                  />
+                </Bar>
+              </BarChart>
+            ) : (
+              /*
+               * Multi-day view: the original AreaChart — unchanged.
+               */
+              <AreaChart data={chartData} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="gradCumulativeBacklog" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="5%" stopColor="var(--color-critical)" stopOpacity={0.22} />
+                    <stop offset="95%" stopColor="var(--color-critical)" stopOpacity={0.02} />
+                  </linearGradient>
+                </defs>
 
-              <XAxis
-                dataKey="label"
-                tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
-                axisLine={{ stroke: "var(--color-border)" }}
-                tickLine={false}
-                interval="preserveStartEnd"
-                minTickGap={40}
-              />
-              <YAxis
-                tickFormatter={(v: number) => formatCompact(v)}
-                tick={{ fontSize: 11, fill: "var(--color-muted-foreground)" }}
-                axisLine={false}
-                tickLine={false}
-                width={52}
-              />
+                <CartesianGrid vertical={false} stroke="var(--color-border)" />
+                <XAxis
+                  {...sharedXAxisProps}
+                  interval="preserveStartEnd"
+                  minTickGap={40}
+                />
+                <YAxis {...sharedYAxisProps} />
+                <Tooltip {...sharedTooltipProps} />
 
-              <Tooltip
-                contentStyle={{
-                  borderRadius: 8,
-                  border: "1px solid var(--color-border)",
-                  background: "var(--color-card)",
-                  fontSize: 12,
-                }}
-                labelFormatter={(_label, payload) => {
-                  const d = payload?.[0]?.payload as (typeof chartData)[number] | undefined;
-                  return d?.displayDate ?? _label;
-                }}
-                formatter={(value: number, name: string) => {
-                  const labels: Record<string, string> = {
-                    cumulativeBacklog: "Cumulative Backlog",
-                    dailyDifference: "Daily Difference",
-                    plannedQuantity: "Planned",
-                    reportedQuantity: "Reported",
-                  };
-                  return [formatNumber(value), labels[name] ?? name];
-                }}
-              />
-
-              <Area
-                type="monotone"
-                dataKey="cumulativeBacklog"
-                name="cumulativeBacklog"
-                stroke="var(--color-critical)"
-                strokeWidth={2.5}
-                fill="url(#gradCumulativeBacklog)"
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
-            </AreaChart>
+                <Area
+                  type="monotone"
+                  dataKey="cumulativeBacklog"
+                  name="cumulativeBacklog"
+                  stroke="var(--color-critical)"
+                  strokeWidth={2.5}
+                  fill="url(#gradCumulativeBacklog)"
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                />
+              </AreaChart>
+            )}
           </ResponsiveContainer>
         </div>
       )}
