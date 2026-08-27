@@ -1,0 +1,81 @@
+services:
+
+  # ── MySQL 8.0 ─────────────────────────────────────────────────────────────
+  mysql:
+    image: mysql:8.0
+    container_name: sebn_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
+      MYSQL_DATABASE:      ${MYSQL_DATABASE:-sebn_dashboard}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      # SQL dump placed here is executed automatically on first startup
+      - ./docker/mysql/init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "3307:3306"   # mapped to 3307 on host to avoid conflict with local MySQL on 3306
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost",
+             "-u", "root", "--password=${DB_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ── Spring Boot backend ───────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: sebn_backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      DB_URL:      jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-sebn_dashboard}
+      DB_USERNAME: ${DB_USERNAME:-root}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DATA_MODE:   IMPORTED
+    ports:
+      - "8080:8080"
+    healthcheck:
+      # SpringDoc registers /v3/api-docs; use it as a lightweight liveness probe
+      # (Spring Boot Actuator is not in pom.xml)
+      test: ["CMD-SHELL",
+             "wget -qO- http://localhost:8080/v3/api-docs > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 40s
+
+  # ── TanStack Start / Nitro (Node preset) frontend ────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # VITE_API_BASE_URL is baked into the client bundle at build time.
+        # The browser runs on the host machine and reaches the backend via
+        # the host-exposed port 8080 — NOT through the Docker network name.
+        VITE_API_BASE_URL: http://localhost:8080/api
+    container_name: sebn_frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD-SHELL",
+             "wget -qO- http://127.0.0.1:3000/ > /dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+volumes:
+  mysql_data:
+    driver: local

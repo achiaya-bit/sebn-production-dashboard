@@ -1,0 +1,14 @@
+node_modules/
+.output/
+.wrangler/
+.vinxi/
+.tanstack/
+.git/
+.gitignore
+dist/
+*.log
+.env
+.env.*
+!.env.example
+README.md
+AGENTS.md

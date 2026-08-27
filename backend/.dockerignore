@@ -1,0 +1,7 @@
+target/
+*.md
+.git/
+.gitignore
+.gitattributes
+.mvn/wrapper/maven-wrapper.jar
+# Keep .mvn/ so the wrapper script works
